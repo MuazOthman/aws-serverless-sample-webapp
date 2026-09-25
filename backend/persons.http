@@ -1,0 +1,62 @@
+# Requests for the Persons API, for the VS Code REST Client extension:
+# https://marketplace.visualstudio.com/items?itemName=humao.rest-client
+#
+# 1. Set @baseUrl to the ApiUrl printed by `pnpm deploy:backend` (no trailing slash)
+# 2. Click "Send Request" above each request, from top to bottom.
+#    "Create" must run first: the requests below it use the id it returns.
+
+@baseUrl = https://xd7tjym2n3.execute-api.us-east-1.amazonaws.com
+
+### Create a person
+# @name createPerson
+POST {{baseUrl}}/persons
+Content-Type: application/json
+
+{
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "email": "ada@example.com",
+  "notes": "First programmer"
+}
+
+###
+
+# The id returned by the "Create a person" request below
+@personId = {{createPerson.response.body.$.id}}
+
+
+### List all persons
+GET {{baseUrl}}/persons
+
+### Get the person
+GET {{baseUrl}}/persons/{{personId}}
+
+### Update the person
+PUT {{baseUrl}}/persons/{{personId}}
+Content-Type: application/json
+
+{
+  "firstName": "Ada",
+  "lastName": "Lovelace",
+  "email": "ada@lovelace.dev"
+}
+
+### Delete the person
+DELETE {{baseUrl}}/persons/{{personId}}
+
+### Get the deleted person (returns 404)
+GET {{baseUrl}}/persons/{{personId}}
+
+### Get a URL to upload a file of persons to (valid for 5 minutes)
+# @name createUploadUrl
+POST {{baseUrl}}/uploads
+Content-Type: application/json
+
+{
+  "fileName": "persons.csv"
+}
+
+### Upload the sample CSV file; its persons are created or updated a few seconds later
+PUT {{createUploadUrl.response.body.$.uploadUrl}}
+
+< ./samples/persons.csv

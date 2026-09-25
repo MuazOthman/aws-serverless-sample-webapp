@@ -1,0 +1,4 @@
+id,firstName,lastName,email,notes
+p-001,Ada,Lovelace,ada@example.com,First programmer
+p-002,Alan,Turing,alan@example.com,"Codebreaker, computer scientist"
+p-003,Grace,Hopper,grace@example.com,"Wrote the first compiler; said ""It's easier to ask forgiveness"""

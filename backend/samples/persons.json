@@ -1,0 +1,15 @@
+[
+  {
+    "id": "p-001",
+    "firstName": "Ada",
+    "lastName": "Lovelace",
+    "email": "ada@lovelace.dev",
+    "notes": "Updated by an upload"
+  },
+  {
+    "id": "p-004",
+    "firstName": "Katherine",
+    "lastName": "Johnson",
+    "email": "katherine@example.com"
+  }
+]

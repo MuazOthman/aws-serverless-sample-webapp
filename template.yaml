@@ -1,0 +1,212 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: A simple CRUD REST API for Persons, and a website that uses it
+
+# Settings shared by every function below.
+# Each function's CodeUri is its own folder in backend/dist/ (built by `pnpm --filter backend build`),
+# which holds just that handler, bundled as index.js, so each function only contains its own code.
+Globals:
+  Function:
+    Runtime: nodejs24.x
+    Environment:
+      Variables:
+        PERSONS_TABLE: !Ref PersonsTable
+  HttpApi:
+    # Let the website (and the Vite dev server) call the API from the browser
+    CorsConfiguration:
+      AllowOrigins:
+        - !GetAtt WebsiteBucket.WebsiteURL
+        - http://localhost:5173
+      AllowMethods: [GET, POST, PUT, DELETE]
+      AllowHeaders: [Content-Type]
+
+Resources:
+  # S3 bucket that hosts the React website (built by `pnpm --filter frontend build`)
+  WebsiteBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      # New buckets block public access by default; turn that off so anyone can read the website
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+
+  # Allow anyone on the internet to read (but not change) the files in the bucket
+  WebsiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebsiteBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub ${WebsiteBucket.Arn}/*
+
+  # Private S3 bucket that CSV / JSON files of persons are uploaded to from the website.
+  # It has a fixed name, made from the stack's unique id, because ProcessUploadFunction needs to
+  # know it: using !Ref UploadsBucket there would make the bucket and the function depend on each other.
+  UploadsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub
+        - persons-uploads-${StackUuid}
+        - StackUuid: !Select [2, !Split ['/', !Ref AWS::StackId]]
+      # Let the website (and the Vite dev server) upload files straight from the browser
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - !GetAtt WebsiteBucket.WebsiteURL
+              - http://localhost:5173
+            AllowedMethods: [PUT]
+            AllowedHeaders: ['*']
+      # Uploaded files are only needed until they are processed, so delete them after a week
+      LifecycleConfiguration:
+        Rules:
+          - Status: Enabled
+            ExpirationInDays: 7
+
+  # DynamoDB table with "id" as its primary key
+  PersonsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST # pay only for the requests you make
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S # S = string
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH # partition key
+
+  CreatePersonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/dist/createPerson/
+      Handler: index.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PersonsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Method: POST
+            Path: /persons
+
+  ListPersonsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/dist/listPersons/
+      Handler: index.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PersonsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Method: GET
+            Path: /persons
+
+  GetPersonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/dist/getPerson/
+      Handler: index.handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref PersonsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Method: GET
+            Path: /persons/{id}
+
+  UpdatePersonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/dist/updatePerson/
+      Handler: index.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PersonsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Method: PUT
+            Path: /persons/{id}
+
+  DeletePersonFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/dist/deletePerson/
+      Handler: index.handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PersonsTable
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Method: DELETE
+            Path: /persons/{id}
+
+  # POST /uploads returns a URL that the website uploads a file to
+  CreateUploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/dist/createUploadUrl/
+      Handler: index.handler
+      Environment:
+        Variables:
+          UPLOADS_BUCKET: !Ref UploadsBucket
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref UploadsBucket
+      Events:
+        Api:
+          Type: HttpApi
+          Properties:
+            Method: POST
+            Path: /uploads
+
+  # Creates or updates the persons in every file uploaded to the uploads bucket
+  ProcessUploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/dist/processUpload/
+      Handler: index.handler
+      Timeout: 60 # seconds; a big file has many persons to save
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub
+              - persons-uploads-${StackUuid}
+              - StackUuid: !Select [2, !Split ['/', !Ref AWS::StackId]]
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PersonsTable
+      Events:
+        FileUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref UploadsBucket
+            Events: s3:ObjectCreated:*
+
+Outputs:
+  ApiUrl:
+    Description: URL of the API
+    Value: !Sub https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  WebsiteBucketName:
+    Description: Name of the S3 bucket the website is uploaded to
+    Value: !Ref WebsiteBucket
+  UploadsBucketName:
+    Description: Name of the S3 bucket that files of persons are uploaded to
+    Value: !Ref UploadsBucket
+  WebsiteUrl:
+    Description: URL of the website
+    Value: !GetAtt WebsiteBucket.WebsiteURL
